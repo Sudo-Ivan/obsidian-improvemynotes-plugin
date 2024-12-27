@@ -1,5 +1,5 @@
 import { App, Plugin, MarkdownView, Notice, requestUrl, Menu, Editor, EditorPosition, Modifier } from 'obsidian';
-import { OllamaSettings, OllamaModel, OllamaResponse, HotkeyDefinition } from './types';
+import { OllamaSettings, OllamaModel, OllamaResponse, HotkeyDefinition, StreamingConfig } from './types';
 import { OllamaSettingTab } from './settings';
 
 const DEFAULT_SETTINGS: OllamaSettings = {
@@ -99,6 +99,9 @@ export default class OllamaPlugin extends Plugin {
         }
         
         try {
+            const originalPosition = editor.getCursor('from'); // Get start of selection
+            const selectionEnd = editor.getCursor('to'); // Get end of selection
+            
             if (this.settings.showGeneratingText) {
                 editor.replaceSelection(this.settings.generatingText);
             }
@@ -106,18 +109,36 @@ export default class OllamaPlugin extends Plugin {
             const improvedText = await this.improveText(selectedText);
 
             if (this.settings.replaceOriginal) {
-                // Simply replace the selection or generating text with improved text
-                editor.replaceSelection(improvedText);
+                // Replace mode - directly replace the selection or generating text
+                if (this.settings.showGeneratingText) {
+                    // First remove the generating text
+                    editor.replaceRange('', originalPosition, {
+                        line: originalPosition.line,
+                        ch: originalPosition.ch + this.settings.generatingText.length
+                    });
+                }
+                // Then insert the improved text at the original selection start
+                await this.streamText(editor, improvedText, originalPosition);
             } else {
-                // Keep original and add improved version below
-                editor.replaceSelection(selectedText); // Restore original text
-                editor.setCursor(editor.getCursor().line + 1);
-                editor.replaceRange(`\n\n${this.settings.improvedTextPrefix}${improvedText}`, editor.getCursor());
+                // Insert below mode
+                editor.replaceSelection(selectedText); // Restore original
+                const newPosition = {
+                    line: selectionEnd.line + 2, // Skip a line after the selection
+                    ch: 0
+                };
+                
+                if (this.settings.improvedTextPrefix) {
+                    editor.replaceRange(`\n\n${this.settings.improvedTextPrefix}`, selectionEnd);
+                    newPosition.ch = this.settings.improvedTextPrefix.length;
+                } else {
+                    editor.replaceRange('\n\n', selectionEnd);
+                }
+                
+                await this.streamText(editor, improvedText, newPosition);
             }
         } catch (error) {
-            // If error occurs, restore original text
             if (this.settings.showGeneratingText) {
-                editor.replaceSelection(selectedText);
+                editor.replaceSelection(selectedText); // Restore original on error
             }
             new Notice(`Error: ${error.message}`);
         }
@@ -125,39 +146,35 @@ export default class OllamaPlugin extends Plugin {
 
     private async streamText(editor: Editor, text: string, position: EditorPosition) {
         if (!this.settings.enableStreaming) {
-            // If streaming is disabled, insert text immediately
+            // Insert text immediately if streaming is disabled
             editor.replaceRange(text, position);
             return;
         }
 
-        const delays = {
-            fast: { min: 5, max: 15 },
-            medium: { min: 10, max: 30 },
-            slow: { min: 20, max: 50 }
+        const speeds: StreamingConfig = {
+            fast: { min: 1, max: 5 },
+            medium: { min: 5, max: 15 },
+            slow: { min: 15, max: 30 }
         };
-        
-        const { min, max } = delays[this.settings.streamingSpeed];
+
+        const speed = speeds[this.settings.streamingSpeed];
+        const chunkSize = 2; // Characters per chunk
         let currentPosition = { ...position };
         let currentIndex = 0;
-        const chunkSize = 2;
-
-        // Clear generating text if it exists
-        if (this.settings.showGeneratingText) {
-            editor.replaceRange('', 
-                position,
-                { line: position.line, ch: position.ch + this.settings.generatingText.length }
-            );
-        }
 
         while (currentIndex < text.length) {
             const chunk = text.slice(currentIndex, currentIndex + chunkSize);
             editor.replaceRange(chunk, currentPosition);
             currentPosition.ch += chunk.length;
             currentIndex += chunkSize;
-            
-            await new Promise(resolve => 
-                setTimeout(resolve, Math.random() * (max - min) + min)
-            );
+
+            if (this.settings.enableStreaming) {
+                await new Promise(resolve => 
+                    setTimeout(resolve, 
+                        Math.random() * (speed.max - speed.min) + speed.min
+                    )
+                );
+            }
         }
     }
 

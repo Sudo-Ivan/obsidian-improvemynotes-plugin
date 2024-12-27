@@ -40,4 +40,10 @@ export interface StreamingSpeedConfig {
     fast: StreamingDelays;
     medium: StreamingDelays;
     slow: StreamingDelays;
+}
+
+export interface StreamingConfig {
+    fast: { min: number; max: number };
+    medium: { min: number; max: number };
+    slow: { min: number; max: number };
 } 
