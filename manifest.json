@@ -1,0 +1,9 @@
+{
+    "id": "obsidian-improve-my-notes",
+    "name": "Obsidian Improve My Notes",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Obsidian plugin to improve your notes with Ollama",
+    "author": "Your name",
+    "isDesktopOnly": false
+} 
